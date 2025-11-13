@@ -1,11 +1,13 @@
 # MLX-Embeddings-LoRA
 
+[![image](https://img.shields.io/pypi/v/mlx-embeddings-lora.svg)](https://pypi.python.org/pypi/mlx-embeddings-lora)
+
 With MLX-Embeddings-LoRA you can, train embedding models locally on Apple Silicon using MLX. Built on top of [mlx-embeddings](https://github.com/Blaizzy/mlx-embeddings.git), supporting all models available in that package with contrastive learning algorithms optimized for semantic search, retrieval, and similarity tasks. Including:
 
-- XLM-RoBERTa (Cross-lingual Language Model - Robustly Optimized BERT Approach)
-- BERT (Bidirectional Encoder Representations from Transformers)
-- ModernBERT (modernized bidirectional encoder-only Transformer model)
-- Qwen3 (Qwen3's embedding model)
+- Qwen3
+- XLM-RoBERTa
+- BERT
+- ModernBERT
 
 ## Features
 
