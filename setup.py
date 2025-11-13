@@ -1,7 +1,7 @@
-from setuptools import setup
-from pathlib import Path
 import sys
+from pathlib import Path
 
+from setuptools import setup
 
 package_dir = Path(__file__).parent / "mlx_embeddings_lora"
 with open("requirements.txt") as fid:

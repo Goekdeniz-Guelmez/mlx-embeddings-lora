@@ -265,13 +265,9 @@ def map_loss_functoins(
 def create_in_batch_negatives(anchor_emb: mx.array, positive_emb: mx.array) -> mx.array:
     batch_size = anchor_emb.shape[0]
     if batch_size == 1:
-        # Generate a random embedding or skip training for batch_size=1
         return mx.random.normal(positive_emb.shape)
-
-    # Use other anchors as negatives for each positive
-    # This creates stronger, more meaningful negatives
     indices = mx.concatenate([mx.arange(1, batch_size), mx.array([0])])
-    negative_emb = anchor_emb[indices]  # Use shifted anchors, not positives
+    negative_emb = anchor_emb[indices]
     return negative_emb
 
 
@@ -345,7 +341,7 @@ def train(
         tqdm.write(f"Node {rank} of {world_size}")
 
     if args.grad_checkpoint:
-        grad_checkpoint(model.layers[0])
+        grad_checkpoint(model.model.layers[0])
 
     grad_accum_steps = args.gradient_accumulation_steps
     if grad_accum_steps < 1:
