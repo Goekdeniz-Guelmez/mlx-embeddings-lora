@@ -1,0 +1,194 @@
+from pathlib import Path
+from typing import Dict
+import types
+import json
+
+from mlx.utils import tree_flatten, tree_unflatten
+import mlx.core as mx
+import mlx.nn as nn
+
+from mlx_lm.models.switch_layers import QuantizedSwitchLinear
+from mlx_lm.tuner.dora import DoRAEmbedding, DoRALinear
+from mlx_lm.tuner.lora import LoRAEmbedding, LoRALinear
+
+
+def linear_to_lora_layers(
+    model: nn.Module,
+    num_layers: int,
+    config: Dict,
+    use_dora: bool = False,
+):
+    """
+    Convert some of the models linear layers to lora layers.
+
+    Args:
+        model (nn.Module): The neural network model.
+        num_layers (int): The number of blocks to convert to lora layers
+        starting from the last layer.
+        config (dict): More configuration parameters for LoRA, including the
+          rank, scale, and optional layer keys.
+        use_dora (bool): If True, uses DoRA instead of LoRA.
+          Default: ``False``
+    """
+
+    def to_lora(layer):
+        if not use_dora and hasattr(layer, "to_lora"):
+            return layer.to_lora(
+                r=config["rank"],
+                scale=config["scale"],
+                dropout=config["dropout"],
+            )
+
+        if isinstance(layer, (nn.Linear, nn.QuantizedLinear)):
+            LoRALayer = DoRALinear if use_dora else LoRALinear
+        elif isinstance(layer, (nn.Embedding, nn.QuantizedEmbedding)):
+            LoRALayer = DoRAEmbedding if use_dora else LoRAEmbedding
+        else:
+            raise ValueError(
+                f"Can't convert layer of type {type(layer).__name__} to LoRA"
+            )
+
+        return LoRALayer.from_base(
+            layer,
+            r=config["rank"],
+            scale=config["scale"],
+            dropout=config["dropout"],
+        )
+
+    if (keys := config.get("keys", None)) is None:
+        keys = set()
+
+        def get_keys_for_lora(p, m):
+            types = (
+                nn.Linear,
+                nn.QuantizedLinear,
+                QuantizedSwitchLinear,
+                nn.Embedding,
+                nn.QuantizedEmbedding,
+            )
+            if hasattr(m, "to_lora") or isinstance(m, types):
+                keys.add(p)
+
+        for l in model.model.layers:
+            l.apply_to_modules(get_keys_for_lora)
+
+    for l in model.model.layers[-max(num_layers, 0) :]:
+        lora_layers = [(k, to_lora(m)) for k, m in l.named_modules() if k in keys]
+        if lora_layers:
+            l.update_modules(tree_unflatten(lora_layers))
+
+    lora_modules = [(k, to_lora(m)) for k, m in model.named_modules() if k in keys]
+    if lora_modules:
+        model.update_modules(tree_unflatten(lora_modules))
+
+
+def load_adapters(model: nn.Module, adapter_path: str) -> nn.Module:
+    """
+    Load any fine-tuned adapters / layers.
+
+    Args:
+        model (nn.Module): The neural network model.
+        adapter_path (str): Path to the adapter configuration file.
+
+    Returns:
+        nn.Module: The updated model with LoRA layers applied.
+    """
+    adapter_path = Path(adapter_path)
+    if not adapter_path.exists():
+        raise FileNotFoundError(f"The adapter path does not exist: {adapter_path}")
+    with open(adapter_path / "adapter_config.json", "r") as fid:
+        config = types.SimpleNamespace(**json.load(fid))
+    fine_tune_type = getattr(config, "fine_tune_type", "lora")
+    if fine_tune_type != "full":
+        linear_to_lora_layers(
+            model,
+            config.num_layers,
+            config.lora_parameters,
+            use_dora=(fine_tune_type == "dora"),
+        )
+    model.load_weights(str(adapter_path / "adapters.safetensors"), strict=False)
+    return model
+
+
+def dequantize(model: nn.Module) -> nn.Module:
+    """
+    Dequantize the quantized linear layers in the model.
+
+    Args:
+        model (nn.Module): The model with quantized linear layers.
+
+    Returns:
+        nn.Module: The model with dequantized layers.
+    """
+    dequantize_layers = []
+    for name, module in model.named_modules():
+        bias = "bias" in module
+        if isinstance(module, nn.QuantizedLinear):
+            cls = nn.Linear
+            kwargs = {"bias": bias}
+        elif isinstance(module, nn.QuantizedEmbedding):
+            kwargs = {}
+            cls = nn.Embedding
+        else:
+            continue
+        weight = mx.dequantize(
+            module.weight,
+            module.scales,
+            module.biases,
+            module.group_size,
+            module.bits,
+        )
+        args = weight.shape[::-1]
+        m = cls(*args, **kwargs)
+        if bias:
+            m.bias = module.bias
+        m.weight = weight
+        dequantize_layers.append((name, m))
+
+    if len(dequantize_layers) > 0:
+        model.update_modules(tree_unflatten(dequantize_layers))
+    return model
+
+
+def remove_lora_layers(model: nn.Module) -> nn.Module:
+    """
+    Remove the LoRA layers from the model.
+
+    Args:
+        model (nn.Module): The model with LoRA layers.
+
+    Returns:
+        nn.Module: The model without LoRA layers.
+    """
+    reset_layers = []
+    for name, module in model.named_modules():
+        if isinstance(module, LoRALinear):
+            reset_layers.append((name, module.linear))
+    if len(reset_layers) > 0:
+        model.update_modules(tree_unflatten(reset_layers))
+    return model
+
+
+def get_total_parameters(model):
+    leaf_modules = tree_flatten(
+        model.leaf_modules(), is_leaf=lambda m: isinstance(m, nn.Module)
+    )
+
+    def nparams(m):
+        if hasattr(m, "bits"):
+            n = 0 if not hasattr(m, "bias") else m.bias.size
+            return n + m.weight.size * 32 // m.bits
+        return sum(v.size for _, v in tree_flatten(m.parameters()))
+
+    return sum(nparams(m) for _, m in leaf_modules)
+
+
+def print_trainable_parameters(model):
+    total_p = get_total_parameters(model) / 1e6
+    trainable_p = (
+        sum(v.size for _, v in tree_flatten(model.trainable_parameters())) / 1e6
+    )
+    print(
+        f"Trainable parameters: {(trainable_p * 100 / total_p):.3f}% "
+        f"({trainable_p:.3f}M/{total_p:.3f}M)"
+    )

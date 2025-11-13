@@ -13,6 +13,10 @@ train: true
 # The fine-tuning method: "lora", "dora", or "full".
 train_type: lora
 
+temperature: 0.07
+margin: 0.5
+similarity: "cosine"
+
 # The fine-tuning method: "infonce", "mnr", "triplet", "nt_xent"
 train_mode: infonce
 
@@ -26,7 +30,7 @@ optimizer: adamw
 #     bias_correction: true
 
 # Directory with {train, valid, test}.jsonl files
-data: 
+data: "Goekdeniz-Guelmez/semantic-triplets-dataset-test"
 
 fuse: true
 
@@ -102,5 +106,6 @@ lora_parameters:
 #  path: "billsum"
 #  train_split: "train[:1000]"
 #  valid_split: "train[-100:]"
-#  prompt_feature: "text"
-#  completion_feature: "summary"
+#  anchor_key: "anchor"
+#  positive_key: "positive"
+#  negative_key: "negative"

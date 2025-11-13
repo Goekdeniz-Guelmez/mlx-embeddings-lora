@@ -216,4 +216,7 @@ __marimo__/
 test*.txt
 .test*.txt
 
+test*.py
+.test*.py
+
 *adapters*
