@@ -130,14 +130,16 @@ def load_hf_dataset(
     tokenizer: PreTrainedTokenizer,
     config,
 ):
+    from datasets import exceptions, load_dataset
+
     try:
-        dataset = hf_load_dataset(data_id)
+        dataset = load_dataset(data_id)
 
         names = ("train", "valid", "test")
 
         train, valid, test = [
             (
-                create_dataset(list(dataset[n]), tokenizer, config)
+                create_dataset(dataset[n], tokenizer, config)
                 if n in dataset.keys()
                 else []
             )
@@ -151,13 +153,15 @@ def load_hf_dataset(
 
 
 def load_custom_hf_dataset(args, tokenizer: PreTrainedTokenizer):
+    import datasets
+
     def create_hf_dataset(dataset_name, config, split, hf_config):
-        ds = hf_load_dataset(
+        ds = datasets.load_dataset(
             dataset_name,
             split=split,
             **hf_config,
         )
-        return create_dataset(list(ds), tokenizer, config)
+        return create_dataset(ds, tokenizer, config)
 
     dataset_collection = args.hf_dataset
     if isinstance(dataset_collection, dict):

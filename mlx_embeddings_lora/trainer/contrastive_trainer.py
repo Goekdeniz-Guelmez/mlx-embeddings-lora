@@ -414,7 +414,7 @@ def train_contrastive(
             it == 1 or it % args.steps_per_eval == 0 or it == args.iters
         ):
             tic = time.perf_counter()
-            val_loss = evaluate(
+            val_loss = evaluate_contrastive(
                 model=model,
                 dataset=val_dataset,
                 loss_fn=loss_fn,
