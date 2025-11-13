@@ -83,7 +83,7 @@ CONFIG_DEFAULTS = {
     "grad_checkpoint": False,
     "lr_schedule": None,
     "lora_parameters": {"rank": 8, "dropout": 0.0, "scale": 10.0},
-    "fuse": True,
+    "fuse": False,
 }
 
 
