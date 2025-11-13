@@ -3,14 +3,16 @@ from pathlib import Path
 import math
 
 from .lora import dequantize, linear_to_lora_layers, load_adapters
+
+import mlx.nn as nn
+
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 from mlx.utils import tree_unflatten
+from mlx_lm.utils import save_model
 from mlx_embeddings.utils import (
     load,
     save_config,
-    save_weights
 )
-import mlx.nn as nn
 
 
 def calculate_iters(train_set, batch_size, epochs) -> int:
@@ -46,7 +48,7 @@ def fuse_and_save_model(
         print(f"Loading adapters from {adapter_path}")
         model = load_adapters(model, adapter_path)
 
-    args = vars(model.args)
+    args = vars(model.model.config)
 
     fused_linears = [
         (n, m.fuse(de_quantize=de_quantize))
@@ -63,7 +65,7 @@ def fuse_and_save_model(
         args.pop("quantization", None)
 
     save_path_obj = Path(save_path)
-    save_weights(save_path_obj, model, donate_model=True)
+    save_model(save_path_obj, model, donate_model=True)
     save_config(args, config_path=save_path_obj / "config.json")
     tokenizer.save_pretrained(save_path_obj)
 

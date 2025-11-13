@@ -19,20 +19,24 @@ class ContrastiveLearningDataset:
         self._anchor_data = []
         self._positive_data = []
         self._negative_data = []
-  
+        
         for d in data:
             self._anchor_data.append(tokenizer.encode(d[anchor_key]))
             self._positive_data.append(tokenizer.encode(d[positive_key]))
-  
             if negative_key and negative_key in d:
                 self._negative_data.append(tokenizer.encode(d[negative_key], truncation=True))
-  
+            else:
+                self._negative_data.append(None)
+    
     def __getitem__(self, idx):
-        return self._anchor_data[idx], self._positive_data[idx], self._negative_data[idx]
-  
+        anchor = self._anchor_data[idx]
+        positive = self._positive_data[idx]
+        negative = self._negative_data[idx] if idx < len(self._negative_data) and self._negative_data[idx] is not None else None
+        return anchor, positive, negative
+    
     def __len__(self):
         return len(self._anchor_data)
-  
+    
     def process(self, d):
         return d
   

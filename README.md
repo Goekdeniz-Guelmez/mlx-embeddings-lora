@@ -21,6 +21,8 @@ With MLX-Embeddings-LoRA you can, train embedding models locally on Apple Silico
   - Triplet Loss: Margin-based triplet optimization
   - NT-Xent Loss: Normalized temperature-scaled cross entropy (SimCLR-style)
 
+So far only Text based embedding models and contrastive learning is supported, more features and algorythms are to come.
+
 - 🔧 **Flexible Dataset Support**
   - Hugging Face datasets
   - JSONL files

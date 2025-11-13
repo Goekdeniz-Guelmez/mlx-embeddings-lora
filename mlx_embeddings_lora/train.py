@@ -51,8 +51,8 @@ CONFIG_DEFAULTS = {
     "load_in_4bits": False,
     "load_in_6bits": False,
     "load_in_8bits": False,
-    "train_type": "infonce",
-    "train_mode": "sft",
+    "train_type": "lora",
+    "train_mode": "infonce",
     "optimizer": "adamw",
     "optimizer_config": {
         "adam": {},
@@ -155,19 +155,20 @@ def build_parser():
         "--temperature",
         type=float,
         help="Temperature for infonce and nt_xent.",
-        default=0.0,
+        default=0.07,
     )
     parser.add_argument(
         "--margin",
         type=float,
         help="Margin for triplet loss.",
-        default=0.0,
+        default=0.5,
     )
     parser.add_argument(
         "--similarity",
         type=str,
         help="Similarity calculation: sine and cosine.",
         default="cosine",
+        choices=["cosine", "sine"],
     )
     parser.add_argument("--batch-size", type=int, help="Minibatch size.")
     parser.add_argument("--iters", type=int, help="Iterations to train for.")
@@ -334,6 +335,8 @@ def train_model(
         steps_per_save=args.save_every,
         adapter_file=adapter_file,
         temperature=args.temperature,
+        margin=args.margin,
+        similarity=args.similarity,
         max_seq_length=args.max_seq_length,
         grad_checkpoint=args.grad_checkpoint,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -343,6 +346,8 @@ def train_model(
         model=model,
         args=training_args,
         optimizer=opt,
+        loss_fn=args.train_mode,
+        similarity=args.similarity,
         train_dataset=CacheDataset(train_set),
         val_dataset=CacheDataset(valid_set),
         training_callback=training_callback,
@@ -356,6 +361,10 @@ def evaluate_model(args, model: nn.Module, tokenizer, test_set):
         batch_size=args.batch_size,
         num_batches=args.test_batches,
         max_seq_length=args.max_seq_length,
+        loss_fn=args.train_mode,
+        similarity=args.similarity,
+        temperature=args.temperature,
+        margin=args.margin,
     )
 
     test_ppl = math.exp(test_loss)
@@ -412,8 +421,6 @@ def run(args, training_callback: TrainingCallback = None):
             tokenizer=tokenizer,
             save_path=args.adapter_path,
             adapter_path=None,
-            de_quantize=True,
-            export_gguf=False,
         )
 
 
