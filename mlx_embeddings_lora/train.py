@@ -15,9 +15,9 @@ from mlx_lm.tuner.utils import build_schedule
 from mlx_lm.utils import save_config
 
 from .trainer.contrastive_trainer import (
-    TrainingArgs,
-    evaluate,
-    train,
+    ContrastiveTrainingArgs,
+    evaluate_contrastive,
+    train_contrastive,
 )
 from .trainer.dataset import CacheDataset, load_dataset
 from .trainer.lora import (
@@ -324,7 +324,7 @@ def train_model(
     if args.train_mode not in ["infonce", "mnr", "triplet", "nt_xent"]:
         raise (f"The train mode {args.train_mode} does not exist.")
 
-    training_args = TrainingArgs(
+    training_args = ContrastiveTrainingArgs(
         batch_size=args.batch_size,
         iters=args.iters,
         val_batches=args.val_batches,
@@ -340,7 +340,7 @@ def train_model(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
     )
 
-    train(
+    train_contrastive(
         model=model,
         args=training_args,
         optimizer=opt,
@@ -353,7 +353,7 @@ def train_model(
 
 
 def evaluate_model(args, model: nn.Module, tokenizer, test_set):
-    test_loss = evaluate(
+    test_loss = evaluate_contrastive(
         model=model,
         dataset=CacheDataset(test_set),
         batch_size=args.batch_size,

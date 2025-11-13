@@ -16,7 +16,7 @@ from .dataset import CacheDataset
 
 
 @dataclass
-class TrainingArgs:
+class ContrastiveTrainingArgs:
     batch_size: int = field(default=4, metadata={"help": "Minibatch size."})
     iters: int = field(default=100, metadata={"help": "Iterations to train for."})
     gradient_accumulation_steps: int = field(
@@ -271,7 +271,7 @@ def create_in_batch_negatives(anchor_emb: mx.array, positive_emb: mx.array) -> m
     return negative_emb
 
 
-def evaluate(
+def evaluate_contrastive(
     model,
     dataset,
     batch_size,
@@ -319,12 +319,12 @@ def evaluate(
     return avg_loss.item()
 
 
-def train(
+def train_contrastive(
     model,
     optimizer,
     train_dataset,
     val_dataset,
-    args: TrainingArgs = TrainingArgs(),
+    args: ContrastiveTrainingArgs = ContrastiveTrainingArgs(),
     loss_fn: str = "infonce",
     similarity: str = "cosine",
     iterate_batches: callable = iterate_batches,
