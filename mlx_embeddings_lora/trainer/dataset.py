@@ -1,12 +1,13 @@
-from typing import Any, Dict, List
-from pathlib import Path
-import types
 import json
-  
-from datasets import exceptions, load_dataset as hf_load_dataset
+import types
+from pathlib import Path
+from typing import Any, Dict, List
+
+from datasets import exceptions
+from datasets import load_dataset as hf_load_dataset
 from transformers import PreTrainedTokenizer
-  
-  
+
+
 class ContrastiveLearningDataset:
     def __init__(
         self,
@@ -19,33 +20,39 @@ class ContrastiveLearningDataset:
         self._anchor_data = []
         self._positive_data = []
         self._negative_data = []
-        
+
         for d in data:
             self._anchor_data.append(tokenizer.encode(d[anchor_key]))
             self._positive_data.append(tokenizer.encode(d[positive_key]))
             if negative_key and negative_key in d:
-                self._negative_data.append(tokenizer.encode(d[negative_key], truncation=True))
+                self._negative_data.append(
+                    tokenizer.encode(d[negative_key], truncation=True)
+                )
             else:
                 self._negative_data.append(None)
-    
+
     def __getitem__(self, idx):
         anchor = self._anchor_data[idx]
         positive = self._positive_data[idx]
-        negative = self._negative_data[idx] if idx < len(self._negative_data) and self._negative_data[idx] is not None else None
+        negative = (
+            self._negative_data[idx]
+            if idx < len(self._negative_data) and self._negative_data[idx] is not None
+            else None
+        )
         return anchor, positive, negative
-    
+
     def __len__(self):
         return len(self._anchor_data)
-    
+
     def process(self, d):
         return d
-  
-  
+
+
 class ConcatenatedDataset:
     def __init__(self, data: List[Any]):
         self._data = data
         self._len = sum(len(d) for d in self._data)
-  
+
     def __getitem__(self, idx: int):
         for data_idx, data in enumerate(self._data):
             j = idx - len(data)
@@ -55,31 +62,31 @@ class ConcatenatedDataset:
         datum = data[idx]
         datum["_dataset"] = data_idx
         return datum
-  
+
     def process(self, d):
         return self._data[d["_dataset"]].process(d)
-  
+
     def __len__(self):
         return self._len
-  
-  
+
+
 class CacheDataset:
     def __init__(self, data: Any):
         self._data = data
         self._proc_data = [None] * len(data)
-  
+
     def itemlen(self, idx: int):
         return len(self._data[idx])
-  
+
     def __getitem__(self, idx: int):
         if self._proc_data[idx] is None:
             self._proc_data[idx] = self._data.process(self._data[idx])
         return self._proc_data[idx]
-  
+
     def __len__(self):
         return len(self._data)
-  
-  
+
+
 def create_dataset(
     data,
     tokenizer: PreTrainedTokenizer,
@@ -88,21 +95,19 @@ def create_dataset(
     anchor_key = getattr(config, "anchor_feature", "anchor")
     positive_key = getattr(config, "positive_feature", "positive")
     negative_key = getattr(config, "negative_feature", "negative")
-  
+
     sample = data[0]
-  
-    if anchor_key in sample and positive_key in sample:  # Fixed: was checking if positive_key NOT in sample
+
+    if (
+        anchor_key in sample and positive_key in sample
+    ):  # Fixed: was checking if positive_key NOT in sample
         return ContrastiveLearningDataset(
-            data,
-            tokenizer,
-            anchor_key,
-            positive_key,
-            negative_key
+            data, tokenizer, anchor_key, positive_key, negative_key
         )
     else:
         raise ValueError("Unsupported data format for contrastive learning training.")
-  
-  
+
+
 def load_local_dataset(
     data_path: Path,
     tokenizer: PreTrainedTokenizer,
@@ -114,12 +119,12 @@ def load_local_dataset(
         with open(path, "r") as fid:
             data = [json.loads(l) for l in fid]
         return create_dataset(data, tokenizer, config)
-  
+
     names = ("train", "valid", "test")
     train, valid, test = [load_subset(data_path / f"{n}.jsonl") for n in names]
     return train, valid, test
-  
-  
+
+
 def load_hf_dataset(
     data_id: str,
     tokenizer: PreTrainedTokenizer,
@@ -127,9 +132,9 @@ def load_hf_dataset(
 ):
     try:
         dataset = hf_load_dataset(data_id)
-  
+
         names = ("train", "valid", "test")
-  
+
         train, valid, test = [
             (
                 create_dataset(list(dataset[n]), tokenizer, config)
@@ -138,13 +143,13 @@ def load_hf_dataset(
             )
             for n in names
         ]
-  
+
     except exceptions.DatasetNotFoundError:
         raise ValueError(f"Not found Hugging Face dataset: {data_id} .")
-  
+
     return train, valid, test
-  
-  
+
+
 def load_custom_hf_dataset(args, tokenizer: PreTrainedTokenizer):
     def create_hf_dataset(dataset_name, config, split, hf_config):
         ds = hf_load_dataset(
@@ -153,11 +158,11 @@ def load_custom_hf_dataset(args, tokenizer: PreTrainedTokenizer):
             **hf_config,
         )
         return create_dataset(list(ds), tokenizer, config)
-  
+
     dataset_collection = args.hf_dataset
     if isinstance(dataset_collection, dict):
         dataset_collection = [dataset_collection]
-  
+
     collection = []
     for ds in dataset_collection:
         ds_path = ds["path"]
@@ -182,7 +187,7 @@ def load_custom_hf_dataset(args, tokenizer: PreTrainedTokenizer):
             )
         else:
             train, valid = [], []
-  
+
         if args.test:
             test_split = ds.get("test_split")
             test = create_hf_dataset(
@@ -193,15 +198,15 @@ def load_custom_hf_dataset(args, tokenizer: PreTrainedTokenizer):
             )
         else:
             test = []
-  
+
         collection.append((train, valid, test))
-  
+
     if len(collection) == 1:
         return collection[0]
-  
+
     return tuple(map(ConcatenatedDataset, zip(*collection)))
-  
-  
+
+
 def load_dataset(args, tokenizer: PreTrainedTokenizer):
     if getattr(args, "hf_dataset", False):
         train, valid, test = load_custom_hf_dataset(args, tokenizer)
@@ -212,7 +217,7 @@ def load_dataset(args, tokenizer: PreTrainedTokenizer):
         else:
             print(f"Loading Hugging Face dataset {args.data}.")
             train, valid, test = load_hf_dataset(args.data, tokenizer, args)
-  
+
     if args.train and len(train) == 0:
         raise ValueError(
             "Training set not found or empty. Must provide training set for fine-tuning."

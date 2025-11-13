@@ -1,33 +1,31 @@
-from pathlib import Path
 import argparse
-import types
 import math
-import yaml
-import re
 import os
+import re
+import types
+from pathlib import Path
 
-import mlx.optimizers as optim
 import mlx.core as mx
 import mlx.nn as nn
+import mlx.optimizers as optim
 import numpy as np
+import yaml
+from mlx_lm.tuner.callbacks import TrainingCallback, WandBCallback
+from mlx_lm.tuner.utils import build_schedule
+from mlx_lm.utils import save_config
 
-from .trainer.utils import from_pretrained, fuse_and_save_model, calculate_iters
-from .trainer.dataset import CacheDataset, load_dataset
 from .trainer.contrastive_trainer import (
     TrainingArgs,
     evaluate,
     train,
 )
+from .trainer.dataset import CacheDataset, load_dataset
 from .trainer.lora import (
     linear_to_lora_layers,
     load_adapters,
     print_trainable_parameters,
 )
-
-
-from mlx_lm.tuner.callbacks import WandBCallback, TrainingCallback
-from mlx_lm.tuner.utils import build_schedule
-from mlx_lm.utils import save_config
+from .trainer.utils import calculate_iters, from_pretrained, fuse_and_save_model
 
 yaml_loader = yaml.SafeLoader
 yaml_loader.add_implicit_resolver(
@@ -263,7 +261,7 @@ def train_model(
     model: nn.Module,
     tokenizer,
     train_set,
-    valid_set = None,
+    valid_set=None,
     training_callback: TrainingCallback = None,
 ):
     mx.random.seed(args.seed)
@@ -325,7 +323,7 @@ def train_model(
 
     if args.train_mode not in ["infonce", "mnr", "triplet", "nt_xent"]:
         raise (f"The train mode {args.train_mode} does not exist.")
-    
+
     training_args = TrainingArgs(
         batch_size=args.batch_size,
         iters=args.iters,

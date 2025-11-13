@@ -1,12 +1,11 @@
+import json
+import types
 from pathlib import Path
 from typing import Dict
-import types
-import json
 
-from mlx.utils import tree_flatten, tree_unflatten
 import mlx.core as mx
 import mlx.nn as nn
-
+from mlx.utils import tree_flatten, tree_unflatten
 from mlx_lm.models.switch_layers import QuantizedSwitchLinear
 from mlx_lm.tuner.dora import DoRAEmbedding, DoRALinear
 from mlx_lm.tuner.lora import LoRAEmbedding, LoRALinear

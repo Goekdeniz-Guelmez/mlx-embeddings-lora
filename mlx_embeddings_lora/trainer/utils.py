@@ -1,18 +1,17 @@
-from typing import Any, Optional, Tuple
-from pathlib import Path
 import math
-
-from .lora import dequantize, linear_to_lora_layers, load_adapters
+from pathlib import Path
+from typing import Any, Optional, Tuple
 
 import mlx.nn as nn
-
-from mlx_lm.tokenizer_utils import TokenizerWrapper
 from mlx.utils import tree_unflatten
-from mlx_lm.utils import save_model
 from mlx_embeddings.utils import (
     load,
     save_config,
 )
+from mlx_lm.tokenizer_utils import TokenizerWrapper
+from mlx_lm.utils import save_model
+
+from .lora import dequantize, linear_to_lora_layers, load_adapters
 
 
 def calculate_iters(train_set, batch_size, epochs) -> int:
@@ -128,7 +127,9 @@ def from_pretrained(
         if already_quantized:
             print("Model already quantized — skipping quantization.")
         else:
-            print(f"Quantizing model with {bits}-bit precision (group size {group_size})...")
+            print(
+                f"Quantizing model with {bits}-bit precision (group size {group_size})..."
+            )
             nn.quantize(model, bits=bits, group_size=group_size)
 
             if hasattr(model, "args"):

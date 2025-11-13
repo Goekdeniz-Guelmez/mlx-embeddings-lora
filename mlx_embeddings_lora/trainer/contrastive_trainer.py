@@ -1,17 +1,16 @@
+import time
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Optional
 from pathlib import Path
-from tqdm import tqdm
-import numpy as np
-import time
+from typing import Optional
 
-from mlx.utils import tree_flatten, tree_map
-from mlx.nn.utils import average_gradients
 import mlx.core as mx
 import mlx.nn as nn
-
+import numpy as np
+from mlx.nn.utils import average_gradients
+from mlx.utils import tree_flatten, tree_map
 from mlx_lm.tuner.trainer import grad_checkpoint
+from tqdm import tqdm
 
 from .dataset import CacheDataset
 
@@ -78,7 +77,7 @@ def triplet_loss(
     positive: mx.array,
     negative: mx.array,
     margin: float = 0.0,
-    similarity: str = "cosine"
+    similarity: str = "cosine",
 ):
     """
     Triplet Loss: max(0, d(a,p) - d(a,n) + margin)
@@ -93,11 +92,11 @@ def triplet_loss(
     else:
         pos_sim = cosine_similarity(anchor, positive)
         neg_sim = cosine_similarity(anchor, negative)
-    
+
     # Distance = 1 - similarity (since embeddings are normalized)
     pos_dist = 1 - pos_sim
     neg_dist = 1 - neg_sim
-    
+
     loss = mx.maximum(0, pos_dist - neg_dist + margin)
     return loss
 
@@ -107,7 +106,7 @@ def infonce_loss(
     positive: mx.array,
     negative: mx.array,
     temperature: float = 1.0,
-    similarity: str = "cosine"
+    similarity: str = "cosine",
 ):
     """
     InfoNCE Loss with single negative
@@ -121,16 +120,13 @@ def infonce_loss(
     else:
         pos_sim = cosine_similarity(anchor, positive) / temperature
         neg_sim = cosine_similarity(anchor, negative) / temperature
-    
+
     logits = mx.stack([pos_sim, neg_sim], axis=-1)
     return -pos_sim + mx.logsumexp(logits, axis=-1)
 
 
 def multiple_negatives_ranking_loss(
-    anchor: mx.array,
-    positive: mx.array,
-    negative: mx.array,
-    similarity: str = "cosine"
+    anchor: mx.array, positive: mx.array, negative: mx.array, similarity: str = "cosine"
 ):
     """
     Per-sample Multiple Negatives Ranking Loss
@@ -144,15 +140,15 @@ def multiple_negatives_ranking_loss(
     else:
         pos_sim = cosine_similarity(anchor, positive)
         neg_sim = cosine_similarity(anchor, negative)
-    
+
     if len(neg_sim.shape) == 1:
         logits = mx.stack([pos_sim, neg_sim], axis=-1)
         labels = mx.zeros(anchor.shape[0], dtype=mx.int32)
     else:
         logits = mx.concatenate([pos_sim[:, None], neg_sim], axis=-1)
         labels = mx.zeros(anchor.shape[0], dtype=mx.int32)
-    
-    losses = nn.losses.cross_entropy(logits, labels, reduction='none')
+
+    losses = nn.losses.cross_entropy(logits, labels, reduction="none")
     return mx.mean(losses)
 
 
@@ -161,7 +157,7 @@ def nt_xent_loss(
     positive: mx.array,
     negative: mx.array,
     temperature: float = 1.0,
-    similarity: str = "cosine"
+    similarity: str = "cosine",
 ):
     """
     NT-Xent Loss (Normalized Temperature-scaled Cross Entropy)
@@ -171,17 +167,17 @@ def nt_xent_loss(
         pos_sim = cosine_similarity(anchor, positive) / temperature
         neg_sim = cosine_similarity(anchor, negative) / temperature
     elif similarity == "sine":
-        pos_sim = - sine_similarity(anchor, positive) / temperature
-        neg_sim = - sine_similarity(anchor, negative) / temperature
+        pos_sim = -sine_similarity(anchor, positive) / temperature
+        neg_sim = -sine_similarity(anchor, negative) / temperature
     else:
         pos_sim = cosine_similarity(anchor, positive) / temperature
         neg_sim = cosine_similarity(anchor, negative) / temperature
-    
+
     # Stack similarities: [positive_sim, negative_sims...]
     if len(neg_sim.shape) == 1:
         neg_sim = neg_sim[None, :]  # Add dimension if single negative
     logits = mx.concatenate([pos_sim[..., None], neg_sim], axis=-1)
-    
+
     # Apply log softmax and take negative log prob of positive (index 0)
     log_softmax = nn.log_softmax(logits, axis=-1)
     loss = -log_softmax[..., 0]
@@ -232,7 +228,9 @@ def iterate_batches(dataset, batch_size, max_seq_length, train=False):
             anchors, anchor_lens = pad_batch(anchors)
             positives, pos_lens = pad_batch(positives)
             negatives = (
-                pad_batch(negatives)[0] if negatives[0] is not None else None # can be None → use in-batch negatives
+                pad_batch(negatives)[0]
+                if negatives[0] is not None
+                else None  # can be None → use in-batch negatives
             )
 
             yield anchors, positives, negatives, anchor_lens, pos_lens
@@ -241,12 +239,25 @@ def iterate_batches(dataset, batch_size, max_seq_length, train=False):
             break
 
 
-def map_loss_functoins(loss_fn: Optional[callable], margin: Optional[float] = 0.0, temperature: Optional[float] = 1.0, similarity: Optional[str] = "cosine"):
+def map_loss_functoins(
+    loss_fn: Optional[callable],
+    margin: Optional[float] = 0.0,
+    temperature: Optional[float] = 1.0,
+    similarity: Optional[str] = "cosine",
+):
     loss_functions = {
-        "triplet": lambda a, p, n: triplet_loss(a, p, n, margin=margin, similarity=similarity),
-        "infonce": lambda a, p, n: infonce_loss(a, p, n, temperature=temperature, similarity=similarity),
-        "mnr": lambda a, p, n: multiple_negatives_ranking_loss(a, p, n, similarity=similarity),
-        "nt_xent": lambda a, p, n: nt_xent_loss(a, p, n, temperature=temperature, similarity=similarity),
+        "triplet": lambda a, p, n: triplet_loss(
+            a, p, n, margin=margin, similarity=similarity
+        ),
+        "infonce": lambda a, p, n: infonce_loss(
+            a, p, n, temperature=temperature, similarity=similarity
+        ),
+        "mnr": lambda a, p, n: multiple_negatives_ranking_loss(
+            a, p, n, similarity=similarity
+        ),
+        "nt_xent": lambda a, p, n: nt_xent_loss(
+            a, p, n, temperature=temperature, similarity=similarity
+        ),
     }
     return loss_functions.get(loss_fn, loss_functions["infonce"])
 
@@ -256,7 +267,7 @@ def create_in_batch_negatives(anchor_emb: mx.array, positive_emb: mx.array) -> m
     if batch_size == 1:
         # Generate a random embedding or skip training for batch_size=1
         return mx.random.normal(positive_emb.shape)
-    
+
     # Use other anchors as negatives for each positive
     # This creates stronger, more meaningful negatives
     indices = mx.concatenate([mx.arange(1, batch_size), mx.array([0])])
@@ -279,10 +290,7 @@ def evaluate(
     model.eval()
     all_losses = []
     loss_func = map_loss_functoins(
-        loss_fn=loss_fn,
-        margin=margin,
-        temperature=temperature,
-        similarity=similarity
+        loss_fn=loss_fn, margin=margin, temperature=temperature, similarity=similarity
     )
     index_iterator = iter(range(num_batches)) if num_batches != -1 else iter(int, 1)
     for _, batch in zip(
@@ -296,10 +304,10 @@ def evaluate(
         anchors, positives, negatives, anchor_lens, pos_lens = batch
         anchor_output = model(anchors)
         positive_output = model(positives)
-        
+
         anchor_emb = anchor_output.text_embeds
         positive_emb = positive_output.text_embeds
-        
+
         if negatives is not None:
             negative_output = model(negatives)
             negative_emb = negative_output.text_embeds
@@ -324,10 +332,12 @@ def train(
     loss_fn: str = "infonce",
     similarity: str = "cosine",
     iterate_batches: callable = iterate_batches,
-    training_callback = None,
+    training_callback=None,
 ):
     mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
-    tqdm.write(f"Starting embedding training with {loss_fn} loss fn, iters: {args.iters}")
+    tqdm.write(
+        f"Starting embedding training with {loss_fn} loss fn, iters: {args.iters}"
+    )
     world = mx.distributed.init()
     world_size = world.size()
     rank = world.rank()
@@ -345,22 +355,22 @@ def train(
         loss_fn=loss_fn,
         margin=args.margin,
         temperature=args.temperature,
-        similarity=similarity
+        similarity=similarity,
     )
 
     def embedding_loss(model, anchors, positives, negatives, anchor_lens, pos_lens):
         anchor_output = model(anchors)
         positive_output = model(positives)
-        
+
         anchor_emb = anchor_output.text_embeds
         positive_emb = positive_output.text_embeds
-        
+
         if negatives is not None:
             negative_output = model(negatives)
             negative_emb = negative_output.text_embeds
         else:
             negative_emb = create_in_batch_negatives(anchor_emb, positive_emb)
-            
+
         losses = loss_func(anchor_emb, positive_emb, negative_emb)
         return mx.mean(losses), anchor_lens.sum()
 
@@ -403,7 +413,7 @@ def train(
                 train=True,
             )
         )
-        
+
         if args.steps_per_eval is not None and (
             it == 1 or it % args.steps_per_eval == 0 or it == args.iters
         ):
