@@ -205,3 +205,15 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# IDE files
+.idea/
+.vscode/
+
+# .DS_Store files
+.DS_Store
+
+test*.txt
+.test*.txt
+
+*adapters*
