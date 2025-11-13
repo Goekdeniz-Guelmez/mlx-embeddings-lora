@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 package_dir = Path(__file__).parent / "mlx_embeddings_lora"
 with open("requirements.txt") as fid:
@@ -16,13 +16,12 @@ setup(
     description="Train Embedding Models on Apple silicon with MLX and the Hugging Face Hub",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
-    readme="README.md",
     author_email="goekdenizguelmez@gmail.com",
     author="Gökdeniz Gülmez",
     url="https://github.com/Goekdeniz-Guelmez/mlx-embeddings-lora",
     license="MIT",
     install_requires=requirements,
-    packages=["mlx_embeddings_lora", "mlx_embeddings_lora.trainer"],
+    packages=find_packages(),
     python_requires=">=3.8",
     entry_points={
         "console_scripts": [

@@ -4,10 +4,6 @@ from typing import Any, Optional, Tuple
 
 import mlx.nn as nn
 from mlx.utils import tree_unflatten
-from mlx_embeddings.utils import (
-    load,
-    save_config,
-)
 from mlx_lm.tokenizer_utils import TokenizerWrapper
 from mlx_lm.utils import save_model
 
@@ -41,6 +37,9 @@ def fuse_and_save_model(
         adapter_path: Path to the trained adapter weights and config.
         de_quantize: Generate a de-quantized model.
     """
+    from mlx_embeddings.utils import (
+        save_config,
+    )
     model.freeze()
 
     if adapter_path is not None:
@@ -86,6 +85,10 @@ def from_pretrained(
     Returns:
         Tuple[nn.Module, tokenizer]: The model and tokenizer.
     """
+    from mlx_embeddings.utils import (
+        load,
+        save_config,
+    )
     print(f"Loading model {model}")
     model, tokenizer = load(model, adapter_path=adapter_path)
     args = vars(model.args) if hasattr(model, "args") else {}
