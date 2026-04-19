@@ -202,7 +202,7 @@ mlx_embeddings_lora.export \
 If you use mlx-embeddings-lora in your research, please cite:
 
 ```bibtex
-@software{mlx_embeddings_lora,
+@software{gülmez2026mlxembeddingslora,
   title = {mlx-embeddings-lora: Efficient Embedding Model Training on Apple Silicon},
   author = {Gökdneiz Gülmez},
   year = {2025},
