@@ -61,6 +61,16 @@ class ContrastiveTrainingArgs:
         default="cosine",
         metadata={"help": "Similarity calculation: sine and cosine."},
     )
+    guide_threshold: float = field(
+        default=0.5,
+        metadata={
+            "help": (
+                "For gist loss: cosine similarity threshold used by the guide model "
+                "to filter false negatives. In-batch pairs where guide similarity "
+                ">= threshold are excluded from G_B (the guided negative set)."
+            )
+        },
+    )
 
 
 def sine_similarity(x: mx.array, y: mx.array) -> mx.array:
@@ -184,6 +194,77 @@ def nt_xent_loss(
     return loss
 
 
+def gist_embed_loss(
+    anchor: mx.array,
+    positive: mx.array,
+    guide_anchor: mx.array,
+    guide_positive: mx.array,
+    temperature: float = 0.01,
+    similarity: str = "cosine",
+    guide_threshold: float = 0.5,
+) -> mx.array:
+    """
+    GISTEmbed Loss (Guided In-sample Selection of Training Negatives).
+
+    Uses a frozen guide model to filter in-batch negatives, keeping only
+    pairs where the guide assigns similarity below guide_threshold (G_B).
+
+    L_G = -log(
+        exp(sim(q_i, p_i+) / tau) /
+        (exp(sim(q_i, p_i+) / tau) + sum_{p_j- in G_B} exp(sim(q_i, p_j-) / tau))
+    )
+
+    Args:
+        anchor: Student model embeddings for queries, shape (B, D).
+        positive: Student model embeddings for positives, shape (B, D).
+        guide_anchor: Guide model embeddings for queries, shape (B, D_g).
+        guide_positive: Guide model embeddings for positives, shape (B, D_g).
+        temperature: Temperature tau; smaller = harder penalty on false negatives.
+        similarity: "cosine" or "sine".
+        guide_threshold: Pairs where guide cosine similarity >= this threshold are
+            treated as false negatives and excluded from G_B.
+    """
+    batch_size = anchor.shape[0]
+
+    # Full pairwise similarity matrix for the student model: (B, B), scaled by tau
+    if similarity == "cosine":
+        sim_matrix = mx.matmul(anchor, positive.T) / temperature
+        guide_sim_matrix = mx.matmul(guide_anchor, guide_positive.T)
+    else:  # sine: negate sqrt(1 - cos^2) so higher value = more similar
+        cos_mat = mx.matmul(anchor, positive.T)
+        sim_matrix = (
+            -mx.sqrt(mx.maximum(mx.zeros_like(cos_mat), 1.0 - cos_mat**2))
+            / temperature
+        )
+        guide_cos = mx.matmul(guide_anchor, guide_positive.T)
+        guide_sim_matrix = -mx.sqrt(
+            mx.maximum(mx.zeros_like(guide_cos), 1.0 - guide_cos**2)
+        )
+
+    # Positive pair similarities: diagonal elements (B,)
+    idx = mx.arange(batch_size)
+    pos_sim = sim_matrix[idx, idx]
+
+    # Guided negative mask: off-diagonal AND guide similarity < threshold
+    # off_diag_mask: True for all j != i
+    # below_thresh_mask: True where guide model considers the pair dissimilar
+    off_diag_mask = mx.eye(batch_size) < 0.5
+    below_thresh_mask = guide_sim_matrix < guide_threshold
+    guided_neg_mask = off_diag_mask & below_thresh_mask  # (B, B) bool
+
+    # Replace non-guided entries with -inf so exp(-inf)=0 in the denominator
+    neg_inf = mx.full(sim_matrix.shape, float("-inf"))
+    masked_sims = mx.where(guided_neg_mask, sim_matrix, neg_inf)  # (B, B)
+
+    # Concatenate positive logit with guided negative logits: (B, B+1)
+    # Column 0 = positive similarity for each anchor
+    all_logits = mx.concatenate([pos_sim[:, None], masked_sims], axis=-1)
+
+    # L_G = -pos_sim + logsumexp([pos_sim, guided_neg_sims])
+    loss = -pos_sim + mx.logsumexp(all_logits, axis=-1)
+    return loss
+
+
 def iterate_batches(dataset, batch_size, max_seq_length, train=False):
     if isinstance(dataset, CacheDataset):
         len_fn = lambda idx: dataset.itemlen(idx)
@@ -258,6 +339,8 @@ def map_loss_functoins(
         "nt_xent": lambda a, p, n: nt_xent_loss(
             a, p, n, temperature=temperature, similarity=similarity
         ),
+        # "gist" is handled separately in train_contrastive / evaluate_contrastive
+        # because it requires guide model embeddings as additional inputs.
     }
     return loss_functions.get(loss_fn, loss_functions["infonce"])
 
@@ -282,8 +365,12 @@ def evaluate_contrastive(
     temperature: float = 0.0,
     margin: float = 0.0,
     iterate_batches: callable = iterate_batches,
+    guide_model=None,
+    guide_threshold: float = 0.5,
 ):
     model.eval()
+    if guide_model is not None:
+        guide_model.eval()
     all_losses = []
     loss_func = map_loss_functoins(
         loss_fn=loss_fn, margin=margin, temperature=temperature, similarity=similarity
@@ -304,13 +391,27 @@ def evaluate_contrastive(
         anchor_emb = anchor_output.text_embeds
         positive_emb = positive_output.text_embeds
 
-        if negatives is not None:
-            negative_output = model(negatives)
-            negative_emb = negative_output.text_embeds
+        if loss_fn == "gist" and guide_model is not None:
+            guide_anchor_emb = guide_model(anchors).text_embeds
+            guide_positive_emb = guide_model(positives).text_embeds
+            mx.eval(guide_anchor_emb, guide_positive_emb)
+            losses = gist_embed_loss(
+                anchor_emb,
+                positive_emb,
+                guide_anchor_emb,
+                guide_positive_emb,
+                temperature=temperature,
+                similarity=similarity,
+                guide_threshold=guide_threshold,
+            )
         else:
-            negative_emb = create_in_batch_negatives(anchor_emb, positive_emb)
+            if negatives is not None:
+                negative_output = model(negatives)
+                negative_emb = negative_output.text_embeds
+            else:
+                negative_emb = create_in_batch_negatives(anchor_emb, positive_emb)
+            losses = loss_func(anchor_emb, positive_emb, negative_emb)
 
-        losses = loss_func(anchor_emb, positive_emb, negative_emb)
         all_losses.append(losses)
         mx.eval(losses)
     all_losses = mx.concatenate(all_losses) if all_losses else mx.array([0.0])
@@ -329,6 +430,7 @@ def train_contrastive(
     similarity: str = "cosine",
     iterate_batches: callable = iterate_batches,
     training_callback=None,
+    guide_model=None,
 ):
     mx.set_wired_limit(mx.metal.device_info()["max_recommended_working_set_size"])
     tqdm.write(
@@ -354,21 +456,52 @@ def train_contrastive(
         similarity=similarity,
     )
 
-    def embedding_loss(model, anchors, positives, negatives, anchor_lens, pos_lens):
-        anchor_output = model(anchors)
-        positive_output = model(positives)
+    if guide_model is not None:
+        guide_model.eval()
 
-        anchor_emb = anchor_output.text_embeds
-        positive_emb = positive_output.text_embeds
+    if loss_fn == "gist" and guide_model is not None:
+        # GISTEmbed: embedding_loss receives pre-computed guide embeddings
+        # appended to the batch tuple by the training loop below.
+        def embedding_loss(
+            model,
+            anchors,
+            positives,
+            negatives,
+            anchor_lens,
+            pos_lens,
+            guide_anchor_emb,
+            guide_positive_emb,
+        ):
+            anchor_output = model(anchors)
+            positive_output = model(positives)
+            anchor_emb = anchor_output.text_embeds
+            positive_emb = positive_output.text_embeds
+            losses = gist_embed_loss(
+                anchor_emb,
+                positive_emb,
+                guide_anchor_emb,
+                guide_positive_emb,
+                temperature=args.temperature,
+                similarity=similarity,
+                guide_threshold=args.guide_threshold,
+            )
+            return mx.mean(losses), anchor_lens.sum()
+    else:
+        def embedding_loss(model, anchors, positives, negatives, anchor_lens, pos_lens):
+            anchor_output = model(anchors)
+            positive_output = model(positives)
 
-        if negatives is not None:
-            negative_output = model(negatives)
-            negative_emb = negative_output.text_embeds
-        else:
-            negative_emb = create_in_batch_negatives(anchor_emb, positive_emb)
+            anchor_emb = anchor_output.text_embeds
+            positive_emb = positive_output.text_embeds
 
-        losses = loss_func(anchor_emb, positive_emb, negative_emb)
-        return mx.mean(losses), anchor_lens.sum()
+            if negatives is not None:
+                negative_output = model(negatives)
+                negative_emb = negative_output.text_embeds
+            else:
+                negative_emb = create_in_batch_negatives(anchor_emb, positive_emb)
+
+            losses = loss_func(anchor_emb, positive_emb, negative_emb)
+            return mx.mean(losses), anchor_lens.sum()
 
     state = [model.state, optimizer.state, mx.random.state]
 
@@ -425,6 +558,8 @@ def train_contrastive(
                 num_batches=args.val_batches,
                 max_seq_length=args.max_seq_length,
                 iterate_batches=iterate_batches,
+                guide_model=guide_model,
+                guide_threshold=args.guide_threshold,
             )
             model.train()
             val_time = time.perf_counter() - tic
@@ -445,11 +580,23 @@ def train_contrastive(
 
         tic = time.perf_counter()
 
-        lvalue, toks, grad_accum = step(
-            batch,
-            grad_accum,
-            it % grad_accum_steps == 0,
-        )
+        if loss_fn == "gist" and guide_model is not None:
+            # Pre-compute guide model embeddings (no gradient required)
+            guide_anchor_emb = guide_model(batch[0]).text_embeds
+            guide_positive_emb = guide_model(batch[1]).text_embeds
+            mx.eval(guide_anchor_emb, guide_positive_emb)
+            gist_batch = (*batch, guide_anchor_emb, guide_positive_emb)
+            lvalue, toks, grad_accum = step(
+                gist_batch,
+                grad_accum,
+                it % grad_accum_steps == 0,
+            )
+        else:
+            lvalue, toks, grad_accum = step(
+                batch,
+                grad_accum,
+                it % grad_accum_steps == 0,
+            )
         losses += lvalue
         n_tokens += toks
         steps += 1

@@ -13,6 +13,7 @@ import yaml
 from mlx_lm.tuner.callbacks import TrainingCallback, WandBCallback
 from mlx_lm.tuner.utils import build_schedule
 from mlx_lm.utils import save_config
+from tqdm import tqdm
 
 from .trainer.contrastive_trainer import (
     ContrastiveTrainingArgs,
@@ -60,6 +61,8 @@ CONFIG_DEFAULTS = {
     "temperature": 0.07,
     "margin": 0.5,
     "similarity": "cosine",
+    "guide_model": None,
+    "guide_threshold": 0.5,
     "data": "data/",
     "seed": 0,
     "num_layers": 16,
@@ -134,8 +137,27 @@ def build_parser():
         "--train-mode",
         type=str,
         default="infonce",
-        choices=["infonce", "mnr", "triplet", "nt_xent"],
-        help="Training mode: infonce, mnr, triplet, nt_xent, default is infonce",
+        choices=["infonce", "mnr", "triplet", "nt_xent", "gist"],
+        help="Training mode: infonce, mnr, triplet, nt_xent, gist, default is infonce",
+    )
+    parser.add_argument(
+        "--guide-model",
+        type=str,
+        default=None,
+        help=(
+            "Path or Hugging Face repo of the frozen guide model used by GISTEmbed "
+            "loss to filter false in-batch negatives. Required when --train-mode=gist."
+        ),
+    )
+    parser.add_argument(
+        "--guide-threshold",
+        type=float,
+        default=0.5,
+        help=(
+            "Cosine similarity threshold for the guide model (GISTEmbed only). "
+            "In-batch pairs with guide similarity >= threshold are treated as "
+            "false negatives and excluded from G_B. Default: 0.5."
+        ),
     )
     parser.add_argument(
         "--optimizer",
@@ -321,8 +343,14 @@ def train_model(
 
     opt = opt_class(learning_rate=lr, **optimizer_config)
 
-    if args.train_mode not in ["infonce", "mnr", "triplet", "nt_xent"]:
-        raise (f"The train mode {args.train_mode} does not exist.")
+    if args.train_mode not in ["infonce", "mnr", "triplet", "nt_xent", "gist"]:
+        raise ValueError(f"The train mode {args.train_mode} does not exist.")
+
+    if args.train_mode == "gist" and not getattr(args, "guide_model", None):
+        raise ValueError(
+            "--guide-model must be set when using --train-mode=gist. "
+            "Provide a path or Hugging Face repo for the frozen guide model."
+        )
 
     training_args = ContrastiveTrainingArgs(
         batch_size=args.batch_size,
@@ -338,7 +366,14 @@ def train_model(
         max_seq_length=args.max_seq_length,
         grad_checkpoint=args.grad_checkpoint,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        guide_threshold=getattr(args, "guide_threshold", 0.5),
     )
+
+    guide_model = None
+    if args.train_mode == "gist" and getattr(args, "guide_model", None):
+        tqdm.write(f"Loading guide model from {args.guide_model}")
+        guide_model, _ = from_pretrained(model=args.guide_model)
+        guide_model.freeze()
 
     train_contrastive(
         model=model,
@@ -349,10 +384,11 @@ def train_model(
         train_dataset=CacheDataset(train_set),
         val_dataset=CacheDataset(valid_set),
         training_callback=training_callback,
+        guide_model=guide_model,
     )
 
 
-def evaluate_model(args, model: nn.Module, tokenizer, test_set):
+def evaluate_model(args, model: nn.Module, tokenizer, test_set, guide_model=None):
     test_loss = evaluate_contrastive(
         model=model,
         dataset=CacheDataset(test_set),
@@ -363,6 +399,8 @@ def evaluate_model(args, model: nn.Module, tokenizer, test_set):
         similarity=args.similarity,
         temperature=args.temperature,
         margin=args.margin,
+        guide_model=guide_model,
+        guide_threshold=getattr(args, "guide_threshold", 0.5),
     )
 
     test_ppl = math.exp(test_loss)
@@ -410,7 +448,13 @@ def run(args, training_callback: TrainingCallback = None):
 
     if args.test:
         print("Testing")
-        evaluate_model(args, model, tokenizer, test_set)
+        test_guide_model = None
+        if args.train_mode == "gist" and getattr(args, "guide_model", None):
+            tqdm.write(f"Loading guide model for testing from {args.guide_model}")
+            test_guide_model, _ = from_pretrained(model=args.guide_model)
+            test_guide_model.freeze()
+            test_guide_model.eval()
+        evaluate_model(args, model, tokenizer, test_set, guide_model=test_guide_model)
 
     if args.fuse:
         print("Fusing model")
