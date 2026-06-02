@@ -73,7 +73,7 @@ class ContrastiveLossTest(unittest.TestCase):
 
         # Row 0 keeps its off-diagonal negative. Row 1 filters its off-diagonal
         # because the guide scores it above that row's assigned positive.
-        guide_anchor = mx.array([[1.0, 0.0], [0.6, 0.8]])
+        guide_anchor = mx.array([[1.0, 0.0], [0.8, 0.6]])
         guide_positive = mx.array([[1.0, 0.0], [0.0, 1.0]])
 
         losses = gist_embed_loss(

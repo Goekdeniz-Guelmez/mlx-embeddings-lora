@@ -20,7 +20,7 @@ class FakeTokenizer:
 class CountingDataset:
     def __init__(self):
         self.calls = 0
-        self.items = ["alpha", "beta"]
+        self.items = [{"text": "alpha"}, {"text": "beta"}]
 
     def __getitem__(self, idx):
         return self.items[idx]
@@ -30,7 +30,7 @@ class CountingDataset:
 
     def process(self, item):
         self.calls += 1
-        return item.upper()
+        return item["text"].upper()
 
 
 class DatasetTest(unittest.TestCase):
