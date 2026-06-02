@@ -98,6 +98,7 @@ Your dataset should contain anchor-positive pairs:
   - `mnr`: Multiple Negatives Ranking Loss
   - `triplet`: Triplet loss with margin
   - `nt_xent`: NT-Xent (SimCLR-style)
+  - `gist`: GISTEmbed with a frozen guide model
 
 #### Training Hyperparameters
 - `--batch-size`: Training batch size (default: 32)
@@ -113,7 +114,9 @@ Your dataset should contain anchor-positive pairs:
 --model <model_path>              # Model path or HF repo
 --data <data_path>                # Dataset path or HF dataset name
 --train-type lora                 # lora, dora, or full
---train-mode infonce              # infonce, mnr, triplet, nt_xent
+--train-mode infonce              # infonce, mnr, triplet, nt_xent, gist
+--guide-model <model_path>        # required for gist
+--guide-threshold 0.0             # gist margin below each guide positive score
 
 # Training schedule
 --batch-size 4                    # Batch size
