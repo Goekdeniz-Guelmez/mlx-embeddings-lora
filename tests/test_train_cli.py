@@ -3,10 +3,11 @@ import unittest
 
 try:
     from mlx_embeddings_lora import train
-except RuntimeError as exc:
-    if "No Metal device available" not in str(exc):
+except (ImportError, RuntimeError) as exc:
+    message = str(exc)
+    if "No Metal device available" not in message and "libmlx.so" not in message:
         raise
-    raise unittest.SkipTest("MLX Metal device is not available")
+    raise unittest.SkipTest("MLX runtime is not available in this environment")
 
 
 class TrainCliTest(unittest.TestCase):
