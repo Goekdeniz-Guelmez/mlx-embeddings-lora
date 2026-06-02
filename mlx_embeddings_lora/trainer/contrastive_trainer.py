@@ -158,8 +158,7 @@ def multiple_negatives_ranking_loss(
         logits = mx.concatenate([pos_sim[:, None], neg_sim], axis=-1)
         labels = mx.zeros(anchor.shape[0], dtype=mx.int32)
 
-    losses = nn.losses.cross_entropy(logits, labels, reduction="none")
-    return mx.mean(losses)
+    return nn.losses.cross_entropy(logits, labels, reduction="none")
 
 
 def nt_xent_loss(
@@ -354,7 +353,7 @@ def create_in_batch_negatives(anchor_emb: mx.array, positive_emb: mx.array) -> m
     if batch_size == 1:
         return mx.random.normal(positive_emb.shape)
     indices = mx.concatenate([mx.arange(1, batch_size), mx.array([0])])
-    negative_emb = anchor_emb[indices]
+    negative_emb = positive_emb[indices]
     return negative_emb
 
 

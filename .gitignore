@@ -218,5 +218,7 @@ test*.txt
 
 test*.py
 .test*.py
+!tests/test*.py
+!tests/test_*.py
 
 *adapters*
