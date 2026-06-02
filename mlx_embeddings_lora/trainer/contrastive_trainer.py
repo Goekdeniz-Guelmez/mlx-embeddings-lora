@@ -62,12 +62,12 @@ class ContrastiveTrainingArgs:
         metadata={"help": "Similarity calculation: sine and cosine."},
     )
     guide_threshold: float = field(
-        default=0.5,
+        default=0.0,
         metadata={
             "help": (
-                "For gist loss: cosine similarity threshold used by the guide model "
-                "to filter false negatives. In-batch pairs where guide similarity "
-                ">= threshold are excluded from G_B (the guided negative set)."
+                "For gist loss: margin below each row's guide positive score. "
+                "In-batch pairs where guide similarity >= positive_score - margin "
+                "are excluded from G_B (the guided negative set)."
             )
         },
     )
@@ -201,13 +201,13 @@ def gist_embed_loss(
     guide_positive: mx.array,
     temperature: float = 0.01,
     similarity: str = "cosine",
-    guide_threshold: float = 0.5,
+    guide_threshold: float = 0.0,
 ) -> mx.array:
     """
     GISTEmbed Loss (Guided In-sample Selection of Training Negatives).
 
-    Uses a frozen guide model to filter in-batch negatives, keeping only
-    pairs where the guide assigns similarity below guide_threshold (G_B).
+    Uses a frozen guide model to filter in-batch negatives, keeping only pairs that
+    are less similar than the assigned positive according to the guide model.
 
     L_G = -log(
         exp(sim(q_i, p_i+) / tau) /
@@ -221,7 +221,8 @@ def gist_embed_loss(
         guide_positive: Guide model embeddings for positives, shape (B, D_g).
         temperature: Temperature tau; smaller = harder penalty on false negatives.
         similarity: "cosine" or "sine".
-        guide_threshold: Pairs where guide cosine similarity >= this threshold are
+        guide_threshold: Margin below the guide model's positive-pair similarity.
+            Pairs where guide similarity >= positive_score - guide_threshold are
             treated as false negatives and excluded from G_B.
     """
     batch_size = anchor.shape[0]
@@ -245,11 +246,14 @@ def gist_embed_loss(
     idx = mx.arange(batch_size)
     pos_sim = sim_matrix[idx, idx]
 
-    # Guided negative mask: off-diagonal AND guide similarity < threshold
+    # Guided negative mask: off-diagonal AND less similar than the assigned positive
+    # according to the guide model. This follows the canonical GISTEmbed filtering
+    # rule and treats guide_threshold as an absolute margin.
     # off_diag_mask: True for all j != i
-    # below_thresh_mask: True where guide model considers the pair dissimilar
+    # below_thresh_mask: True where guide model considers the pair a valid negative
     off_diag_mask = mx.eye(batch_size) < 0.5
-    below_thresh_mask = guide_sim_matrix < guide_threshold
+    positive_guide_sim = guide_sim_matrix[idx, idx][:, None]
+    below_thresh_mask = guide_sim_matrix < (positive_guide_sim - guide_threshold)
     guided_neg_mask = off_diag_mask & below_thresh_mask  # (B, B) bool
 
     # Replace non-guided entries with -inf so exp(-inf)=0 in the denominator

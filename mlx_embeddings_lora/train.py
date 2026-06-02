@@ -62,7 +62,7 @@ CONFIG_DEFAULTS = {
     "margin": 0.5,
     "similarity": "cosine",
     "guide_model": None,
-    "guide_threshold": 0.5,
+    "guide_threshold": 0.0,
     "data": "data/",
     "seed": 0,
     "num_layers": 16,
@@ -152,11 +152,12 @@ def build_parser():
     parser.add_argument(
         "--guide-threshold",
         type=float,
-        default=0.5,
+        default=0.0,
         help=(
-            "Cosine similarity threshold for the guide model (GISTEmbed only). "
-            "In-batch pairs with guide similarity >= threshold are treated as "
-            "false negatives and excluded from G_B. Default: 0.5."
+            "Absolute margin below each guide positive-pair similarity "
+            "(GISTEmbed only). In-batch pairs with guide similarity >= "
+            "positive_score - margin are treated as false negatives and "
+            "excluded from G_B. Default: 0.0."
         ),
     )
     parser.add_argument(
